@@ -1,0 +1,193 @@
+---
+title: "Dumbbell lifting prediction"
+date: "January 30, 2016"
+---
+
+# Background
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform dumbbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+# Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+# Load the data
+We expect pml-training.csv and pml-training.csv files to be in the current folder.
+
+```{r, echo=TRUE}
+training  <- read.csv("pml-training.csv", header = TRUE, na.strings=c("NA","#DIV/0!"))
+testing  <- read.csv("pml-testing.csv", header = TRUE)
+
+training$classe <- as.factor(training$classe)
+
+```
+
+# Cleaning the data
+
+Let's explore the data set and choose the significant columns.
+We are not interested in any descriptive columns like user name, timestamps and window info.
+
+```{r, echo=TRUE}
+
+#explore the data set
+colnames(training[,1:7])
+```
+
+The first 7 columns should be removed:
+```{r, echo=TRUE}
+#remove timestamps, user name and descriptory columns
+training_clean <- subset(training,select=-c(X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window, num_window))
+
+```
+
+We also do not need any columns with NA values since we can not use them in Random Forest classifier.
+```{r, echo=TRUE}
+
+# build a feature list
+features <- colnames(training_clean[, colSums(is.na(training_clean)) == 0])
+features <- features[features != "classe"]
+```
+
+This is our initial list of features:
+```{r, echo=TRUE}
+print(features)
+
+```
+
+# Cross validation of Random Forest model
+We are going to use Random Forest classifier in our predictions.
+Let's create a function which evaluates a model using a list of preselected features.
+We will be using this function in our feature selection chapter.
+
+Number of folds in cross validation is 3.
+
+```{r, echo=TRUE}
+library(randomForest)
+library(caret)
+set.seed(7777)
+
+evaluate_model <- function(features, data_set, num_trees){
+    training_clean <- subset(data_set,select=c(features, "classe"))
+    accuracy_validation <- 0
+
+    i66 <- createDataPartition(training_clean$classe, p = .66, list = FALSE,times = 1)
+    p1 <- training_clean[-i66,]
+    p12 <- training_clean[i66,]
+    i33 <- createDataPartition(p12$classe, p = .5, list = FALSE,times = 1)
+    p2 <- p12[i33,]
+    p3 <- p12[-i33,]
+    
+    model1 <- randomForest(classe~., data=rbind(p2,p3), ntree=num_trees)
+    model2 <- randomForest(classe~., data=rbind(p1,p3), ntree=num_trees)
+    model3 <- randomForest(classe~., data=rbind(p1,p2), ntree=num_trees)
+    
+    accuracy_validation <- accuracy_validation + confusionMatrix(predict(model1, newdata = p1), p1$classe)$overall[1]
+    accuracy_validation <- accuracy_validation + confusionMatrix(predict(model2, newdata = p2), p2$classe)$overall[1]
+    accuracy_validation <- accuracy_validation + confusionMatrix(predict(model3, newdata = p2), p2$classe)$overall[1]
+    
+    accuracy_validation <- accuracy_validation / 3
+    
+    return (list(1.0, accuracy_validation, model3))
+}
+
+```
+
+# Build all features model
+First, we build a classifier using all the features available.
+
+```{r, echo=TRUE}
+eval_all_features <- evaluate_model(features, training_clean, 500)
+plot(eval_all_features[[3]], main="All features Random Forest")
+```
+The plot of the error of the model gives us an idea about the optimum number of trees.
+We can use reduce the number of trees to 200 without impacting the overall accuracy of the model.
+
+## The accuracy of all features model
+```{r, echo=TRUE}
+print (eval_all_features[[2]])
+```
+
+## The total number of features 
+```{r, echo=TRUE}
+print (length(features))
+```
+
+# Feature selection
+
+We have 52 features in our list. Let's try to do eliminate some highly correlated features and measure the impact of this on the overall validation accuracy.
+
+First, we calculate correlation matrix
+```{r, echo=TRUE}
+#calculated correlation matrix 
+corr <- cor(training_clean[,features])
+```
+
+Second, we eliminate highly correlated features using a differnt cutoff values (from 0.5 to 1.0) and measuring the validation accuracy.
+
+```{r, echo=TRUE}
+cutoffs <- c()
+cutoff_accuracy <- c()
+for (i in 0:10){
+    cutoff = 1.0-i*0.05
+    correlated <- findCorrelation(corr, cutoff=cutoff)
+    if(length(correlated) == 0)
+        features_cutuoff <- features
+    else
+        features_cutuoff <- features[-correlated]
+    eval <- evaluate_model(features_cutuoff, training_clean, 200)
+    cutoffs <- c(cutoffs, cutoff)
+    cutoff_accuracy <- c(cutoff_accuracy, eval[[2]])
+}
+
+plot(cutoffs, cutoff_accuracy, type='b', main = "Impact of eliminating highly correlated features", 
+     xlab = "Cut off correlation value", ylab = "Validation Accuracy", col = 'red')
+
+```
+
+Using this plot we can conclude that the optimum cutoff value is around 0.9
+
+# Build the final model
+
+Let's build the final model with a reduced list of features using 0.9 cutoff value.
+
+```{r, echo=TRUE}
+correlated <- findCorrelation(corr, cutoff=0.9)
+features_final <- features[-correlated]
+```
+
+## The number of features we eliminated:
+```{r, echo=TRUE}
+print (length(correlated))
+```
+
+## Train final model
+```{r, echo=TRUE}
+eval_final <- evaluate_model(features_final, training_clean, 200)
+model_final <- eval_final[[3]]
+print(model_final)
+```
+
+## Final out of sample accuracy 
+```{r, echo=TRUE}
+accuracy_final <- eval_final[[2]]
+print (accuracy_final)
+```
+
+
+# Conlusion
+Based on the accuracy results from the confusion matrix, we expect the out of sample error rate of our model to be (in %):
+```{r, echo=TRUE}
+error_rate <-  100 * (1 - unname(accuracy_final))
+print (error_rate)
+```
+
+
+
+
+
