@@ -1,0 +1,96 @@
+---
+title: "Dumbbell lifting prediction"
+date: "January 30, 2016"
+---
+
+# Background
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform dumbbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+# Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+# Load the data
+```{r, echo=TRUE}
+training  <- read.csv("pml-training.csv", header = TRUE, na.strings=c("NA","#DIV/0!"))
+testing  <- read.csv("pml-testing.csv", header = TRUE)
+
+training$classe <- as.factor(training$classe)
+
+```
+
+
+```{r, echo=TRUE}
+evaluate_model <- function(features, data_set){
+    training_clean <- subset(data_set,select=c(features, "classe"))
+    num_cv <- 3
+    accuracy_training <- 0
+    accuracy_validation <- 0
+    for (i in 1:num_cv){
+        # Create partitions
+        trainIndex <- createDataPartition(training_clean$classe, p = .8, list = FALSE,times = 1)
+        train_partition <- training_clean[ trainIndex,]
+        validate_partition  <- training_clean[-trainIndex,]
+        
+        # train random forest model
+        model_rf <- randomForest(classe~., data=train_partition)
+        
+        # calculate training error
+        cm <- confusionMatrix(predict(model_rf, newdata = train_partition), train_partition$classe)
+        accuracy_training <- accuracy_training + cm$overall[1]
+    
+        # calculate validation error
+        cm <- confusionMatrix(predict(model_rf, newdata = validate_partition), validate_partition$classe)
+        accuracy_validation <- accuracy_validation + cm$overall[1]
+    }
+    
+    return (list(accuracy_training/num_cv, accuracy_validation/num_cv))
+}
+
+```
+
+```{r, echo=TRUE}
+library(randomForest)
+library(caret)
+set.seed(666)
+
+#explore the data set
+colnames(training[,1:7])
+
+#remove timestamps, user name and descriptory columns
+training_clean <- subset(training,select=-c(X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window, num_window))
+
+# build a feature list
+features <- colnames(training_clean[, colSums(is.na(training_clean)) == 0])
+features <- features[features != "classe"]
+
+print ("all features")
+e <- evaluate_model(features, training_clean)
+print (e)
+
+#calculated correlation matrix and find highly correlated features
+corr <- cor(training_clean[,features])
+correlated <- findCorrelation(corr, cutoff=0.95)
+print(features[correlated])
+#remove highly correlated fearures
+features <- features[-correlated]
+
+print ("Without higly correlated features")
+e <- evaluate_model(features, training_clean)
+print (e)
+
+
+```
+
+
+based on the accuracy results from the confusion matrix on the training data, I expect the out of sample error rate to be X.XX%
+
+1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 
+B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B 
